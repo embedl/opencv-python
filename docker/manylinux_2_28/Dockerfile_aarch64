@@ -1,9 +1,9 @@
-# Version: 20260531
-# Image name: quay.io/opencv-ci/opencv-python-manylinux_2_28-aarch64
+# Built by .github/workflows/embedl_wheels.yml for the aarch64 wheel; not published.
 
 FROM quay.io/pypa/manylinux_2_28_aarch64:latest
 
-ARG FFMPEG_VERSION=8.1.1
+ARG FFMPEG_VERSION=9.0.2
+ARG FFMPEG_SHA256=84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98
 ARG FREETYPE_VERSION=2.14.3
 ARG LIBPNG_VERSION=1.6.58
 ARG VPX_VERSION=v1.15.2
@@ -85,6 +85,7 @@ RUN mkdir ~/avif_sources && \
 RUN mkdir ~/ffmpeg_sources && \
     cd ~/ffmpeg_sources && \
     curl -O -L https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.gz && \
+    echo "${FFMPEG_SHA256}  ffmpeg-${FFMPEG_VERSION}.tar.gz" | sha256sum -c - && \
     tar -xf ffmpeg-${FFMPEG_VERSION}.tar.gz && \
     cd ffmpeg-${FFMPEG_VERSION} && \
     PATH=~/bin:$PATH && \
@@ -95,8 +96,8 @@ RUN mkdir ~/ffmpeg_sources && \
     ldconfig && \
     rm -rf ~/ffmpeg_sources
 
-# Self-hosted runner UID is 1004
-RUN useradd ci -m -s /bin/bash -G users --uid=1004 && \
+# GitHub Actions user`s UID is 1001
+RUN useradd ci -m -s /bin/bash -G users --uid=1001 && \
     mkdir /io && \
     chown -R ci:ci /io && \
     # This needs to find ffmpeg packages from ci user

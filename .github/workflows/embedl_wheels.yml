@@ -1,0 +1,154 @@
+# Builds opencv-python-headless with FFmpeg 9.0.2 for Linux x86_64 and aarch64 (manylinux_2_28,
+# abi3), tests it, and on a tag NN+embedl.N publishes the wheels, the FFmpeg source they bundle
+# and SHA256SUMS as a GitHub release. Pushes to embedl/** branches build and test only. See EMBEDL.md.
+name: Embedl wheels
+
+on:
+  push:
+    branches: ['embedl/**']
+    tags: ['*+embedl.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FFMPEG_VERSION: 9.0.2
+  FFMPEG_SHA256: 84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86_64
+            runner: ubuntu-24.04
+            test_image: ''
+          - platform: aarch64
+            runner: ubuntu-24.04-arm
+            test_image: quay.io/opencv-ci/multibuild-noble_arm64v8:2026-06-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    services:
+      # multibuild pulls its build image, so the image built below is served from here
+      registry:
+        image: registry:2.8.3
+        ports:
+          - 5000:5000
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      REPO_DIR: .
+      PROJECT_SPEC: opencv-python
+      MB_PYTHON_VERSION: '3.9'
+      TRAVIS_PYTHON_VERSION: '3.9'
+      MB_ML_VER: 2_28
+      TRAVIS_BUILD_DIR: ${{ github.workspace }}
+      CONFIG_PATH: travis_config.sh
+      DOCKER_IMAGE: localhost:5000/opencv-python-builder:${{ matrix.platform }}
+      USE_CCACHE: 0
+      UNICODE_WIDTH: 32
+      PLAT: ${{ matrix.platform }}
+      SDIST: 0
+      ENABLE_HEADLESS: 1
+      ENABLE_CONTRIB: 0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver-opts: network=host
+
+      - name: Build the builder image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: docker/manylinux_2_28
+          file: docker/manylinux_2_28/Dockerfile_${{ matrix.platform }}
+          push: true
+          tags: ${{ env.DOCKER_IMAGE }}
+          cache-from: type=gha,scope=builder-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=builder-${{ matrix.platform }}
+
+      - name: Build the wheel
+        run: source scripts/build.sh
+
+      - name: Check the bundled FFmpeg and a video round trip
+        run: |
+          docker run --rm -e FFMPEG_VERSION -v "$PWD/wheelhouse:/wheelhouse:ro" python:3.12-slim-bookworm bash -euo pipefail -c '
+            pip install --no-cache-dir -q /wheelhouse/opencv_python_headless-*.whl
+            python - <<"PY"
+          import ctypes, glob, os, cv2, numpy as np
+          libs = os.path.join(os.path.dirname(os.path.dirname(cv2.__file__)), "opencv_python_headless.libs")
+          avutil = glob.glob(os.path.join(libs, "libavutil-*.so*"))
+          assert len(avutil) == 1, avutil
+          lib = ctypes.CDLL(avutil[0])
+          lib.av_version_info.restype = ctypes.c_char_p
+          version = lib.av_version_info().decode()
+          print("cv2", cv2.__version__, "FFmpeg", version)
+          assert version == os.environ["FFMPEG_VERSION"], version
+          path = "/tmp/roundtrip.mp4"
+          writer = cv2.VideoWriter(path, cv2.CAP_FFMPEG, cv2.VideoWriter_fourcc(*"mp4v"), 10, (64, 48))
+          assert writer.isOpened()
+          for i in range(20):
+              writer.write(np.full((48, 64, 3), i * 10, np.uint8))
+          writer.release()
+          capture = cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+          frames = 0
+          while capture.read()[0]:
+              frames += 1
+          assert frames == 20, frames
+          print("round trip:", frames, "frames")
+          PY
+          '
+
+      - name: Run OpenCV's Python tests
+        env:
+          MB_PYTHON_VERSION: '3.12'
+          TEST_DEPENDS: numpy==2.2.6
+          DOCKER_TEST_IMAGE: ${{ matrix.test_image }}
+        run: source scripts/install.sh
+
+      - name: Save the wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: wheel-${{ matrix.platform }}
+          path: wheelhouse/opencv*.whl
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download the wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download the FFmpeg source the wheels bundle
+        run: |
+          curl -fsSL -o dist/ffmpeg-$FFMPEG_VERSION.tar.gz https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.gz
+          echo "$FFMPEG_SHA256  dist/ffmpeg-$FFMPEG_VERSION.tar.gz" | sha256sum -c -
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "opencv-python-headless $TAG" \
+            --notes "opencv-python-headless built from this tag with FFmpeg $FFMPEG_VERSION (source attached, LGPL-2.1-or-later), for Linux x86_64 and aarch64. Install by URL with the sha256 from SHA256SUMS. See EMBEDL.md." \
+            *

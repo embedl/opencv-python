@@ -220,6 +220,10 @@ def main():
     if sys.platform.startswith("linux") and not is64 and "bdist_wheel" in sys.argv:
         subprocess.check_call("patch -p0 < patches/patchOpenEXR", shell=True)
 
+    # OpenCV 5.0.0's videoio ported to FFmpeg 9 (opencv/opencv#30513, eb604b9a2b)
+    if sys.platform.startswith("linux") and "bdist_wheel" in sys.argv:
+        subprocess.check_call("patch -p1 < patches/patchFFmpeg9", shell=True)
+
     # OS-specific components during CI builds
     if is_CI_build:
 
