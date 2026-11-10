@@ -6,7 +6,7 @@ name: Embedl wheels
 on:
   push:
     branches: ['embedl/**']
-    tags: ['*+embedl.*']
+    tags: ['*\+embedl.*']
   workflow_dispatch:
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
       registry:
         image: registry:2.8.3
         ports:
-          - 5000:5000
+          - '5000:5000'
     env:
       ACTIONS_ALLOW_UNSECURE_COMMANDS: true
       REPO_DIR: .
