@@ -1,4 +1,4 @@
-# Builds opencv-python-headless with FFmpeg 9.0.2 for Linux x86_64 and aarch64 (manylinux_2_28,
+# Builds opencv-python-headless with FFmpeg 9.1 for Linux x86_64 and aarch64 (manylinux_2_28,
 # abi3), tests it, and on a tag NN+embedl.N publishes the wheels, the FFmpeg source they bundle
 # and SHA256SUMS as a GitHub release. Pushes to embedl/** branches build and test only. See EMBEDL.md.
 name: Embedl wheels
@@ -13,8 +13,8 @@ permissions:
   contents: read
 
 env:
-  FFMPEG_VERSION: 9.0.2
-  FFMPEG_SHA256: 84960df915059e8754fef2cd7c9afeb614062b1b5458ec471eecee619ee04e98
+  FFMPEG_VERSION: '9.1'
+  FFMPEG_SHA256: a7a5c7219a9232e2017f7584922b50e96c1d6d7b55737184f94e394a229d13c7
 
 jobs:
   build:
